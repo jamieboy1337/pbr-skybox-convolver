@@ -7,10 +7,10 @@ CLFLAGS = /EHsc /W3
 all: HDRTest
 
 HDRTest: HDR
-	g++ $(GCCFLAGS) -o HDRReadTest HDR.a test/HDRReadTest.cpp
+	g++ $(GCCFLAGS) -o HDRReadTest HDR.o test/HDRReadTest.cpp
 
 HDR:
-	g++ $(GCCFLAGS) -c -o HDR.a src/HDR.cpp
+	g++ $(GCCFLAGS) -c -o HDR.o src/HDR.cpp
 
 clean:
-	rm HDRReadTest HDR.a
+	rm HDRReadTest HDR.o

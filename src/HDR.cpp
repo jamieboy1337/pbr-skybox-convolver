@@ -1,10 +1,9 @@
-#include "Convolver.hpp"
-#include "Convolver_internal.hpp"
+#include "HDR.hpp"
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
-// more or less copy our glsl impl in cpp
+
 
 static const std::string HDR_MAGIC   = "#?RADIANCE";
 static const std::string FORMAT_NAME = "FORMAT";
@@ -22,7 +21,6 @@ HDR LoadHDRImage(const std::string& path) {
   // check for the right flags and read floats from there
   std::ifstream hdr(path, std::ifstream::in);
   // note: handle failure, EOF
-  char drop;
   std::string magic;
   magic.resize(10, '\0');
   // ok in c++11 - string data can be modified iirc
@@ -112,8 +110,8 @@ HDR LoadHDRImage(const std::string& path) {
   
   unsigned char* data = readHDRData(hdr, dim_major, dim_minor);
   float* col = HDRDataToFloat(data, dim_major, dim_minor);
-
-  for (size_t i = 0; i < dim_major * dim_minor; i++) {
+  size_t pixels = static_cast<size_t>(dim_major * dim_minor);
+  for (size_t i = 0; i < pixels; i++) {
     std::cout << *(col + 3 * i) << ", " << *(col + 3 * i + 1) << ", " << *(col + 3 * i + 2) << std::endl;
   }
   // double check??
@@ -182,7 +180,6 @@ static unsigned char* readHDRData(std::istream& data, int major, int minor) {
 }
 
 static void readLine(std::istream& data, int len, unsigned char* output) {
-  unsigned char* out = output;
   unsigned char r, g, b, e;
 
   r = data.get();

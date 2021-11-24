@@ -1,5 +1,4 @@
 #include <iostream>
-
 #include "Convolver_internal.hpp"
 
 int main(int argc, char** argv) {

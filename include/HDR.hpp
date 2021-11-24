@@ -1,3 +1,6 @@
+#ifndef HDR_H_
+#define HDR_H_
+
 #include <string>
 
 struct HDR {
@@ -10,3 +13,5 @@ struct HDR {
 };
 
 HDR LoadHDRImage(const std::string& path);
+
+#endif // HDR_H_

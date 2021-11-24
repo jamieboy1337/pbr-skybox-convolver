@@ -1,3 +1,6 @@
+#ifndef CONVOLVER_INTERNAL_H_
+#define CONVOLVER_INTERNAL_H_
+
 #include <string>
 #include <glm/glm.hpp>
 
@@ -23,3 +26,4 @@ float* GetDiffuseData(const HDR* data, int dim, glm::vec3 center, glm::vec3 up);
  */ 
 float** GetSpecularData(const HDR* data, int maxDim, glm::vec3 center, glm::vec3 up);
 
+#endif // CONVOLVER_INTERNAL_H_

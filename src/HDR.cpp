@@ -1,9 +1,9 @@
-#include "HDR.hpp"
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
 
+#include "HDR.hpp"
 
 static const std::string HDR_MAGIC   = "#?RADIANCE";
 static const std::string FORMAT_NAME = "FORMAT";
@@ -110,7 +110,7 @@ HDR LoadHDRImage(const std::string& path) {
   
   unsigned char* data = readHDRData(hdr, dim_major, dim_minor);
   float* col = HDRDataToFloat(data, dim_major, dim_minor);
-  size_t pixels = static_cast<size_t>(dim_major * dim_minor);
+  size_t pixels = static_cast<size_t>(dim_major) * static_cast<size_t>(dim_minor);
   for (size_t i = 0; i < pixels; i++) {
     std::cout << *(col + 3 * i) << ", " << *(col + 3 * i + 1) << ", " << *(col + 3 * i + 2) << std::endl;
   }
@@ -138,12 +138,13 @@ static int getResolutionValue(const std::string& dim) {
 }
 
 static float* HDRDataToFloat(unsigned char* in, int major, int minor) {
-  float* res = new float[major * minor * 4];
+  size_t bytes = static_cast<size_t>(major) * static_cast<size_t>(minor) * 4;
+  float* res = new float[bytes];
   float exponent;
   unsigned char* cur = in;
   float* out = res;
 
-  unsigned char* stop = cur + (major * minor * 4);
+  unsigned char* stop = cur + (bytes);
   unsigned char r, g, b, e;
   while (cur < stop) {
     r = *cur++;
@@ -168,7 +169,8 @@ static float* HDRDataToFloat(unsigned char* in, int major, int minor) {
  *  @param minor - number of entries in each line
  */ 
 static unsigned char* readHDRData(std::istream& data, int major, int minor) {
-  unsigned char* res = new unsigned char[major * minor * 4];
+  size_t bytes = static_cast<size_t>(major) * static_cast<size_t>(minor) * 4;
+  unsigned char* res = new unsigned char[bytes];
   unsigned char* live = res;
   for (int i = 0; i < major; i++) {
     readLine(data, minor, live);

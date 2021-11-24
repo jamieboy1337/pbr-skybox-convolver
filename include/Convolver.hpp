@@ -1,3 +1,6 @@
+#ifndef CONVOLVER_H_
+#define CONVOLVER_H_
+
 #include <string>
 
 struct SkyboxFace {
@@ -38,3 +41,4 @@ struct Skybox {
  *  @returns generated skybox :3
  */ 
 Skybox* ConvolveSkybox(const std::string& path, int diffuseSize, int maxSpecularSize, int maxSpecularLevels);
+#endif // CONVOLVER_H_

@@ -1,3 +1,10 @@
 HDRReadTest
 *.a
 *.o
+.vs
+x64
+.vscode
+build
+vc140.*
+*.sln
+*.vcxproj*

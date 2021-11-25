@@ -3,40 +3,114 @@
 #include <iostream>
 #include <fstream>
 
+#include <glm/glm.hpp>
+
 #include "HDR.hpp"
+
+#define RGB_ADD(col, t, out) {\
+  out[0] += col[0] * t;\
+  out[1] += col[1] * t;\
+  out[2] += col[2] * t;\
+}
+
+struct hdr_file_info {
+  std::ifstream* stream;
+  std::streampos streamsize;
+};
 
 static const std::string HDR_MAGIC   = "#?RADIANCE";
 static const std::string FORMAT_NAME = "FORMAT";
 static const std::string FORMAT_RLE  = "32-bit_rle_rgbe";
+static const std::string EOF_ERROR   = "reached eof before file was done parsing";
 
 static int getResolutionValue(const std::string& dim);
-static unsigned char* readHDRData(std::istream& data, int major, int minor);
-static void readLineOldRLE(std::istream& file, int len, unsigned char* output);
-static void readLineARLE(std::istream& file, int len, unsigned char* output);
-static void readLine(std::istream& data, int len, unsigned char* output);
+static unsigned char* readHDRData(const hdr_file_info& data, int major, int minor);
+static void readLineOldRLE(const hdr_file_info& file, int len, unsigned char* output);
+static void readLineARLE(const hdr_file_info& file, int len, unsigned char* output);
+static void readLine(const hdr_file_info& data, int len, unsigned char* output);
 static float* HDRDataToFloat(unsigned char* in, int major, int minor);
 
+HDR::HDR(int width, int height, float* data) 
+  : x(width), y(height), colorData(data), res_step_x(1.0F / static_cast<float>(width)), res_step_y(1.0F / static_cast<float>(height)) {}
+
+void HDR::nearestRGBLookup(float tex_x, float tex_y, float rgb_out[3]) {
+  float tex_x_actual = glm::fract(tex_x);
+  float tex_y_actual = glm::fract(tex_y);
+
+  int pixel_x = static_cast<int>(tex_x_actual * static_cast<float>(x) + 0.5F) % x;
+  int pixel_y = static_cast<int>((1.0F - tex_y_actual) * static_cast<float>(y) + 0.5F) % y;
+
+  const float* colresult = (colorData + 3 * (x * pixel_y + pixel_x));
+  memcpy(rgb_out, colresult, 3 * sizeof(float));
+}
+
+void HDR::linearRGBLookup(float tex_x, float tex_y, float rgb_out[3]) {
+  float pix_x = tex_x * x;
+  float pix_y = glm::fract(1.0F - tex_y) * y;
+
+  float f_x = floor(pix_x);
+  float f_y = floor(pix_y);
+
+  float t_x = pix_x - f_x;
+  float t_y = pix_y - f_y;
+
+  float l_x = f_x * res_step_x;
+  float l_y = f_y * res_step_y;
+
+  // do our lookups now
+  rgb_out[0] = 0;
+  rgb_out[1] = 0;
+  rgb_out[2] = 0;
+  
+  float temp[3];
+  float fac_temp;
+
+  this->nearestRGBLookup(l_x, l_y, temp);
+  fac_temp = (1.0 - t_x) * (1.0 - t_y);
+  RGB_ADD(temp, fac_temp, rgb_out);
+
+  this->nearestRGBLookup(l_x + res_step_x, l_y, temp);
+  fac_temp = t_x * (1.0 - t_y);
+  RGB_ADD(temp, fac_temp, rgb_out);
+
+  this->nearestRGBLookup(l_x, l_y + res_step_y, temp);
+  fac_temp = (1.0 - t_x) * t_y;
+  RGB_ADD(temp, fac_temp, rgb_out);
+
+  this->nearestRGBLookup(l_x + res_step_x, l_y + res_step_y, temp);
+  fac_temp = t_x * t_y;
+  RGB_ADD(temp, fac_temp, rgb_out);
+}
+
+// return ptr to handle invalid?
 HDR LoadHDRImage(const std::string& path) {
+  HDR res(-1, -1, NULL);
+
+  hdr_file_info hdr;
   // just open the file
   // check for the right flags and read floats from there
-  std::ifstream hdr(path, std::ifstream::in);
+  hdr.stream = new std::ifstream(path, std::ifstream::in | std::ifstream::binary);
+  hdr.stream->seekg(0, hdr.stream->end);
+  hdr.streamsize = hdr.stream->tellg();
+  hdr.stream->seekg(0);
+  if (hdr.stream->fail()) {
+    std::cerr << "could not open desired file :(" << std::endl; 
+    return res;
+  }
   // note: handle failure, EOF
   std::string magic;
   magic.resize(10, '\0');
   // ok in c++11 - string data can be modified iirc
-  hdr.read(const_cast<char*>(magic.data()), 10);
-  std::cout << magic << std::endl;
-  std::cout << HDR_MAGIC << std::endl;
+  hdr.stream->read(const_cast<char*>(magic.data()), 10);
+
   if (HDR_MAGIC.compare(magic) != 0) {
     std::cout << HDR_MAGIC.compare(magic) << std::endl;
     std::cerr << "INCORRECT MAGIC!!!" << std::endl;
-    exit(1);
-  } else {
-    std::cout << ":D" << std::endl;
+    return res;
   }
 
-  while (hdr.get() == '\n');
-  hdr.unget();
+  while (hdr.stream->get() == '\n');
+  hdr.stream->unget();
 
   std::string line, key, val;
   std::string format;
@@ -45,7 +119,14 @@ HDR LoadHDRImage(const std::string& path) {
     // read line
     // if empty: double \n indicates that we're done reading
     // else: find the = sign, get pre and post. look for format
-    std::getline(hdr, line);
+
+    // if for some reason we reach the end of the file due to a bug,
+    // just return.
+    if (hdr.stream->eof()) {
+      return res;
+    }
+
+    std::getline(*hdr.stream, line);
     std::cout << line << std::endl;
     
     // final line :)
@@ -75,52 +156,51 @@ HDR LoadHDRImage(const std::string& path) {
   if (format.size() == 0) {
     // format string not found
     std::cerr << "FORMAT STRING NOT FOUND" << std::endl;
-    exit(1);
-  } else {
-    std::cout << "Format: " << format << std::endl;
+    return res;
   }
   
   if (format.compare(FORMAT_RLE) != 0) {
     std::cerr << "CANNOT HANDLE FORMAT " << format << std::endl;
-    exit(1);
+    return res;
   }
 
   // at this point, we read the empty line, so the next line is res data
+  if (hdr.stream->eof()) {
+    // early eof
+    return res;
+  }
   
   std::string resolution;
 
-  std::getline(hdr, resolution);
-  std::cout << resolution << std::endl;
+  std::getline(*hdr.stream, resolution);
   size_t space_pos = resolution.find(' ');
+  if (space_pos == resolution.npos) {
+    return res;
+  }
 
   space_pos = resolution.find(' ', space_pos + 1);
+  if (space_pos == resolution.npos) {
+    return res;
+  }
 
   std::string res_major = resolution.substr(0, space_pos);
   std::string res_minor = resolution.substr(space_pos + 1);
-
-  std::cout << res_major << ", " << res_minor << std::endl;
   
   // <+/-><dim> <num> <+/-><other dim> <num>
   int dim_major = getResolutionValue(res_major);
   int dim_minor = getResolutionValue(res_minor);
-
-  std::cout << dim_major << " AND " << dim_minor << std::endl;
   // todo: write a quick test exec which uses convolver
   // write a header to facilitate testing (shouldnt be necessary in final)
   
+  if (dim_major > 65536 || dim_minor > 65536 || dim_major <= 0 || dim_minor <= 0) {
+    // invalid resolution field
+    return res;
+  }
+
   unsigned char* data = readHDRData(hdr, dim_major, dim_minor);
   float* col = HDRDataToFloat(data, dim_major, dim_minor);
   size_t pixels = static_cast<size_t>(dim_major) * static_cast<size_t>(dim_minor);
-  for (size_t i = 0; i < pixels; i++) {
-    std::cout << *(col + 3 * i) << ", " << *(col + 3 * i + 1) << ", " << *(col + 3 * i + 2) << std::endl;
-  }
-  // double check??
-  // move this to an HDR exclusive file??
-  HDR res;
-  res.x = 1;
-  res.y = 1;
-  res.colorData = NULL;
-  return res;
+  return HDR(dim_minor, dim_major, col);
 }
 /**
  *  Extracts dimensionality from resolution tuple
@@ -138,8 +218,12 @@ static int getResolutionValue(const std::string& dim) {
 }
 
 static float* HDRDataToFloat(unsigned char* in, int major, int minor) {
-  size_t bytes = static_cast<size_t>(major) * static_cast<size_t>(minor) * 4;
+  size_t bytes = static_cast<size_t>(major) * static_cast<size_t>(minor) * 3;
   float* res = new float[bytes];
+  if (res == NULL) {
+    return res;
+  }
+
   float exponent;
   unsigned char* cur = in;
   float* out = res;
@@ -154,9 +238,9 @@ static float* HDRDataToFloat(unsigned char* in, int major, int minor) {
 
     exponent = pow(2.0F, static_cast<float>(e) - 128.0F);
 
-    *out++ = ((static_cast<float>(r) + 0.5) / 256.0F) * exponent;
-    *out++ = ((static_cast<float>(g) + 0.5) / 256.0F) * exponent;
-    *out++ = ((static_cast<float>(b) + 0.5) / 256.0F) * exponent;
+    *out++ = ((static_cast<float>(r) + 0.5F) / 256.0F) * exponent;
+    *out++ = ((static_cast<float>(g) + 0.5F) / 256.0F) * exponent;
+    *out++ = ((static_cast<float>(b) + 0.5F) / 256.0F) * exponent;
   }
 
   return res;
@@ -168,30 +252,41 @@ static float* HDRDataToFloat(unsigned char* in, int major, int minor) {
  *  @param major - number of lines in hdr file
  *  @param minor - number of entries in each line
  */ 
-static unsigned char* readHDRData(std::istream& data, int major, int minor) {
+static unsigned char* readHDRData(const hdr_file_info& data, int major, int minor) {
   size_t bytes = static_cast<size_t>(major) * static_cast<size_t>(minor) * 4;
   unsigned char* res = new unsigned char[bytes];
+  if (res == NULL) {
+    return res;
+  }
+
   unsigned char* live = res;
   for (int i = 0; i < major; i++) {
     readLine(data, minor, live);
     live += (minor * 4);
-    std::cout << "read line " << i << std::endl;
+    if (data.stream->eof()) {
+      return NULL;
+    }
   }
 
   return res;  
 }
 
-static void readLine(std::istream& data, int len, unsigned char* output) {
+static void readLine(const hdr_file_info& data, int len, unsigned char* output) {
+  // ensure we have 4 bytes avail to read
   unsigned char r, g, b, e;
 
-  r = data.get();
-  g = data.get();
-  b = data.get();
-  e = data.get();
+  r = data.stream->get();
+  g = data.stream->get();
+  b = data.stream->get();
+  e = data.stream->get();
+
+  if (data.stream->eof()) {
+    return;
+  }
 
   if (r != 2 || g != 2 || (b & 128)) {
     // might bug -- 4 ungets would work too :(
-    data.seekg(-4, std::ios_base::cur);
+    data.stream->seekg(-4, std::ios_base::cur);
     return readLineOldRLE(data, len, output);
   }
 
@@ -202,24 +297,31 @@ static void readLine(std::istream& data, int len, unsigned char* output) {
     exit(1);
   }
 
-  readLineARLE(data, len, output);
+  return readLineARLE(data, len, output);
 }
 
-static void readLineARLE(std::istream& file, int len, unsigned char* output) {
-  unsigned char code, repeatCount, temp;
+static void readLineARLE(const hdr_file_info& data, int len, unsigned char* output) {
+  int code, repeatCount, temp;
+  char c;
   for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < len; ) {
-      code = file.get();
+    int j;
+    for (j = 0; j < len; ) {
+
+      if (data.stream->eof()) {
+        std::cerr << EOF_ERROR << std::endl;
+      }
+
+      data.stream->get(c);
+      code = *reinterpret_cast<unsigned char*>(&c);
       if (code > 128) {
         repeatCount = code & 127;
-        temp = file.get();
+        temp = data.stream->get();
         while (repeatCount--) {
-          *(output + (4 * j++) + i) = temp;
+          *(output + (4 * j++) + i) = static_cast<unsigned char>(temp);
         }
-
       } else {
         while (code--) {
-          *(output + (4 * j++) + i) = file.get();
+          *(output + (4 * j++) + i) = static_cast<unsigned char>(data.stream->get());
         }
       }
     }
@@ -230,15 +332,20 @@ static void readLineARLE(std::istream& file, int len, unsigned char* output) {
   return;
 }
 
-static void readLineOldRLE(std::istream& file, int len, unsigned char* output) {
+static void readLineOldRLE(const hdr_file_info& data, int len, unsigned char* output) {
   unsigned char r, g, b, e;
   unsigned char* out = output;
   int repeat_offset = 0;
   for (int i = 0; i < len; i++) {
-    r = file.get();
-    g = file.get();
-    b = file.get();
-    e = file.get();
+    if (data.stream->eof()) {
+      std::cerr << "reached eof before file was done parsing" << std::endl;
+      return;
+    }
+
+    r = data.stream->get();
+    g = data.stream->get();
+    b = data.stream->get();
+    e = data.stream->get();
 
     if (r == 1 && g == 1 && b == 1) {
       const unsigned char* repeater = output - 4;
